@@ -14,5 +14,6 @@
   - Created June 6, 2017
   - Author: Jorge A. Chan-Lau
   - QR and EVT Workshop, SBS, Lima, Peru
+  - [Web preview](https://htmlpreview.github.io/?https://github.com/jchanlauimf/Systemic-Risk/blob/master/CoVaR/QRTutorial.html)
   
 Last updated: October 20, 2017 by Jorge A. Chan-Lau  
