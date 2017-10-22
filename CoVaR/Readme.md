@@ -9,4 +9,9 @@
 - CoVaR_Tutorial.html
   - Created October 20, 2017
   - Author: Jorge A. Chan-Lau
+- QRTutorial_html
+  - Created June 6, 2017
+  - Author: Jorge A. Chan-Lau
+  - QR and EVT Workshop, SBS, Lima, Peru
+  
 Last updated: October 20, 2017 by Jorge A. Chan-Lau  
