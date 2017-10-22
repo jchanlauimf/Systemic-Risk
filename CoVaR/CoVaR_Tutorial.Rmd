@@ -1,0 +1,200 @@
+---
+title: 'CoVaR in R: A Quick Tutorial'
+author: International Monetary Fund and Risk Management Institute, National University
+  of Singapore
+date: Macrofinancial Linkages, Systemic Risk, and Macroprudential Policy; Washington,
+  D.C., November 6-8, 2017
+output:
+  html_document: default
+  html_notebook: default
+  pdf_document: default
+  word_document: default
+subtitle: Jorge A. Chan-Lau
+---
+
+# Objective
+
+This tutorial teaches how to estimate the $CoVaR$ and $\Delta CoVaR$ measures using `R`. The estimation requires using the `R` package `quantreg` developed by Roger Koenker. 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Getting started
+
+## Setting up the working directory
+
+Typically, we start by setting up a working directory in your computer. For this tutorial, the directory has already been set up for you, and it is named `C:/ChanLau/CoVaR`.
+
+Start RStudio. In the IDE, go to the console window. There, change the woking directory to the one containing the data files using the command `setwd()`. The argument for the command should be the name of the desired working directory. 
+
+```{r class.source='bg-success', class.output='bg-warning'}
+setwd("D:/Work/IET MPP Course/Workshops/CoVaR")
+
+# The directory in the D: hard drive is the working directory in my personal computer.
+# set your directory to "C:/ChanLau/CoVaR"
+
+```
+To confirm the working directory is the desired one, type `getwd()` and execute the command pressing the `Enter` key. Afterwards, clean the memory using the command `rm(list=ls())`:
+
+```{r class.source='bg-success', class.output='bg-warning'}
+getwd()
+rm(list=ls())
+```
+## Installing and loading packages
+
+There are numerous mathematical and statistical methods in `R` available through external packages (or libraries) stored in the `CRAN` repository. The tutorial uses several packages: `quantreg` to estimate quantile regression models; `lubridate` and `dplyr` to manipulate data; and `ggplot2` to produce charts. 
+
+Installing a package requires downloading it first. When there is access to the Internet, the following command checks whether the package is installed, and downloads it if not:
+
+```{r, message=FALSE, warning=FALSE, class.source='bg-success', class.output='bg-warning'}
+if(!require(quantreg)){install.packages("quantreg")}
+if(!require(dplyr)){install.packages("dplyr")}
+if(!require(ggplot2)){install.packages("ggplot2")}
+if(!require(lubridate)){install.packages("lubridate")}
+```
+
+To make the libraries accessible the `R` programs, run the `library()` command:
+
+```{r, message=FALSE, warning=FALSE, class.source='bg-success', class.output='bg-warning'}
+library(quantreg)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+```
+
+The libraries and functions are ready to be used.
+
+## Reading and preparing the data files
+
+ Check the data files we have for this exercise in the *Files* window in the bottom left pane of your `RStudio` IDE (Figure 1)
+
+![Files in CoVaR tutorial directory](figFilesDirectory.png)
+
+The `PD_XYZ.csv` file contains time series data for the probabilities of default (PDs) of bank `XYZ` for different horizons: 1, 3, 6, 12, 24, 36, and 60 months. The PD data was downloaded from the Credit Research Initiative (CRI) at the National University of Singapore on October 20,2017. The PDs were calculated using the model calibration of June 10, 2017, and using data available on September 29, 2017. The sample data ends on March 31, 2017. Different firms have different start dates.
+
+![Data structure of a `PD_XYZ.csv` file](figPDData.png)
+
+We use the function `read.csv()`, included in the base package `utils`, to read the `.csv` data files.
+Let's read the data for two large U.S. banks, Bank of New York, and Wells Fargo, into two data frames, `BNY` and `WFG` respectively:
+
+```{r, message=FALSE, warning=FALSE, class.source='bg-success', class.output='bg-warning'}
+fileName = "PD_Bank of New York Mellon Corp,The.csv"   
+BNY  = read.csv(fileName, header = TRUE, sep =",")
+fileName = "PD_Wells Fargo & Co.csv"   
+WFG  = read.csv(fileName, header = TRUE, sep =",")
+rm(fileName)
+```
+
+Check the `Global Environment` window in the IDE to confirm the data frames are there, 
+
+![Global environment `PD_XYZ.csv` file](figGlobalEnvironment.png)
+
+and click on any of them to check the data frame format, and if the data is OK.
+
+![`BNY` data frame](figDataFrame.png)
+
+The column names, as read from the original `cvs` files, are ugly. Let's change them:
+
+```{r class.source='bg-success', class.output='bg-warning'}
+nice_names = c('1mo', '3mo', '6mo', '1yr', '2yr','3yr','5yr')
+colnames(BNY)[2:8] = nice_names
+colnames(WFG)[2:8] = nice_names
+rm(nice_names)
+```
+
+We will estimate the $CoVaR$ and $\Delta CoVaR$ measures for the 1-yr PDs. Let's create an appropriate data frame. First, we check if the sample dates in the `BNY` and `WFG` data frames are the same:
+
+```{r class.source='bg-success', class.output='bg-warning'}
+identical(BNY$Date,WFG$Date)
+
+```
+
+since this is the case, we proceed to create the data frame `the.data`. Note the use of the command `ymd`, from the `lubridate` package, to transform the alpha numerical values in `Dates` to a format the graphics commands `plot()` or `ggplot()` can use:
+
+```{r}
+
+#logit transformation of the PDs
+
+logBNY = log(BNY$`1yr`)/(1-log(BNY$`1yr`))  
+logWFG = log(WFG$`1yr`)/(1-log(WFG$`1yr`))  
+
+# create the data frame for QR estimation
+
+the.data = data.frame(ymd(BNY$Date),BNY$`1yr`, WFG$`1yr`, logBNY, logWFG)
+colnames(the.data) = c("Dates", "BNY", "WFG", "logBNY", "logWFG")
+
+```
+
+Plot the time series and check whether there are some data anomalies:
+
+```{r}
+ggplot(the.data, aes(x=Dates, y=BNY)) + geom_line()
+ggplot(the.data, aes(x=Dates, y=WFG)) + geom_line()
+
+```
+
+# $CoVaR$ and $\Delta CoVaR$ Estimation
+
+The function `rq()` in the `quantreg` package estimates the quantile regression (QR) given a formula. Let's use it to find the QR of Bank of New York's PD on Wells Fargo's PD for $\tau =0.99$. We use this quantile since higher PDs imply higher risk, and what interest us is what happens when PDs are substantially large. The usage is `rq(formula, quantile, data frame)`:
+
+```{r}
+# Estimate QR for tau = 0.99
+
+QR99 = rq(logWFG~logBNY,tau = 0.99, data=the.data)  # QR, 99 percentile
+
+```
+
+To visualize how the QR performs agains the data, plot a scatter plot of the PDs for both banks, and overlay the OLS line (black dashed line), as well as the QR lines for different percentiles (red for the 99 percentile, blue for the 50 percentile, or median regression, and shades of gray for other percentiles):
+
+```{r class.source='bg-success', class.output='bg-warning'}
+# Plot the data against OLS and QRs for different percentiles
+
+plot(the.data$logBNY, the.data$logWFG, cex = 0.25, type = "n", xlab="log BNY PD", 
+     ylab = "log WFG PD")
+points(the.data$logBNY,the.data$logWFG,cex =1.00, col = "black")
+abline(lm(the.data$logWFG~the.data$logBNY), col = "black", lty=2, lwd =2 )      # OLS regressino
+abline(rq(logWFG~logBNY,tau = 0.50, data=the.data), col = "blue", lwd = 2)     # Median regression
+abline(rq(logWFG~logBNY,tau = 0.01, data=the.data), col = "grey80", lwd = 2)   #  1 percentile QR
+abline(rq(logWFG~logBNY,tau = 0.25, data=the.data), col = "grey80", lwd = 2)   # 25 percentile QR
+abline(rq(logWFG~logBNY,tau = 0.75, data=the.data), col = "grey80", lwd = 2)   # 75 percentile QR
+abline(rq(logWFG~logBNY,tau = 0.99, data=the.data), col = "red", lwd = 2)      # 99 percentile QR
+```
+
+The estimation of the $\Delta CoVaR$ requires the values of the 50 percentile and the 99 percentile of the realizations of the logit of Bank of New York's PD. We can use the function `quantile()`
+
+
+```{r class.source='bg-success', class.output='bg-warning'}
+# Find the sample quantiles corresponding to the 50 and 99 percentiles
+
+BNY50 = quantile(logBNY, 0.50)
+BNY99 = quantile(logBNY, 0.99)
+
+# Get the coefficient for the logit PD
+
+betaBNY = QR99$coefficients[2]
+
+# Calculate the Delta CoVaR
+
+DeltaCoVaR_BNY = betaBNY*(BNY99-BNY50)
+DeltaCoVaR_BNY
+
+```
+
+Estimating the  $\Delta CoVaR$ over a rolling window is typically used to track how the systemic risk a firm poses changes over time. For instance, in the April 2016 GFSR we presented these charts:
+
+![CoVaR Indices, GFSR, April 2016](figCoVaR.png)
+
+### References
+
+- Chan-Lau, J.A. 2017. [Quantile Regressions in R: a Quick Tutorial](https://htmlpreview.github.io/?https://github.com/jchanlauimf/CoVaR-Demo/blob/master/html/QRTutorial.html)
+- Koenker, R. 2005. [*Quantile Regression*](https://www.amazon.com/Quantile-Regression-Econometric-Society-Monographs/dp/0521608279) Cambridge University Press.
+- Koenker, R. 2015. [Package 'quantreg'](https://cran.r-project.org/web/packages/quantreg/quantreg.pdf). CRAN repository.
+- Koenker, R. 2015. [Quantile Regression in R: a Vignette](https://cran.r-project.org/web/packages/quantreg/vignettes/rq.pdf). CRAN repository.
+
+
+
+
+
+
