@@ -1,0 +1,363 @@
+---
+title: 'Systemic Risk Contributions in the Portfolio Approach: a R Tutorial'
+author: International Monetary Fund and Risk Management Institute, National University
+  of Singapore
+date: Macrofinancial Linkages, Systemic Risk, and Macroprudential Policy; Washington,
+  D.C., November 6-8, 2017
+output:
+  html_document: default
+  html_notebook: default
+  pdf_document: default
+  word_document: default
+subtitle: Jorge A. Chan-Lau
+---
+
+# Objective
+
+This tutorial illustrates how to calculate systemic risk charges using the portfolio approach. The examples illustrate the principles underlying three different methodologies:
+
+1. The distress insurance premium (Huang, Zhou, and Zhu, 2011).
+2. The marginal contribution to systemic risk (Tarashev, Borio, and Tsatsaronis, 2010).
+3. The incremental contribution to systemic risk (Chan-Lau, 2010).
+
+
+All calculations are performed using the `R` package `GCPM` authored by Kevin Jakov (2016), and freely available from the CRAN repository.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Getting started
+
+## Setting up the working directory
+
+We start by setting up a working directory in the computer. For this tutorial, the directory has been set up already, and it is named `C:/ChanLau/Portfolio`. To get started, start RStudio. In the IDE, go to the console window. In there, set the working directory to the one where the data file is using the command `setwd()`, as indicated below:
+
+```{r class.source='bg-success', class.output='bg-warning'}
+setwd("D:/Work/IET MPP Course/Workshops/Risk Budget")
+
+# Note that this command reflects the current setup in the instructor computer.
+# The command you should use is:
+#
+#   setwd("C:/ChanLau/Portfolio")
+
+```
+
+To confirm that we are in the right directory, type `getwd()` in the console window, and press the `Enter` key:
+
+
+```{r class.source='bg-success', class.output='bg-danger'}
+getwd()
+```
+
+Afterwards, clean the memory using the command `rm(list=ls())`:
+
+```{r class.source='bg-success', class.output='bg-danger'}
+rm(list=ls())
+```
+
+
+## Installing and loading packages
+
+In this tutorial we use several packages:
+
+1. `GCPM` to calculate the credit loss distributions.
+2. General purpose packages to manipulate:
+  + dates (`lubridate`) 
+  + data (`dplyr`)
+  + graphs (`ggplot2`)
+
+
+With internet access, the following commands download the packages if they are not installed already in the computer `R` distribution: 
+
+```{r, message=FALSE, warning=FALSE, class.source='bg-success', class.output='bg-danger'}
+if(!require(GCPM)){install.packages("GCPM")}
+if(!require(dplyr)){install.packages("dplyr")}
+if(!require(ggplot2)){install.packages("ggplot2")}
+if(!require(lubridate)){install.packages("lubridate")}
+```
+
+The current `R` session needs to call the packages. The `library()` command achieves this:
+
+```{r, message=FALSE, warning=FALSE, class.source='bg-success', class.output='bg-danger'}
+library(GCPM)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+```
+
+Now, the libraries and functions are ready to be used.
+
+## Setting up the portfolio model
+
+Load the data file, `firmdata.csv`, in the data frame `firmdata` using the `read.csv()` command:
+
+```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
+
+rm(list=ls())
+filename = "firmdata.csv"
+firmdata = read.csv(filename, sep=",")
+rm(filename)
+
+n.firms = dim(firmdata)[1]
+
+PD = firmdata$PD
+EAD = firmdata$EAD
+LGD = firmdata$LGD
+```
+
+The package `GCPM` requires assigning business lines and countries to each firm. This information is useful when using the *CreditRisk+* option as the loss distribution model. In this tutorial, we use the one-factor model which is an extension of Merton capital structure model of the firm  (Merton, 1974), is the underlying model behind Basel II (Gordy, 2003), and serves as the main model behind the *CreditMetrics* methodology. You may wonder why we do not use *CreditRisk+*. The reason is simple: it is not very precise when PDs are high. What are high PDs? Above 1 percent on annual basis for a *AAA* firm is considered high !
+
+In the one factor model, a single common factor drives the value of the firm and affects its probability of default. The business sector `A` represents this factor, and we assign this to the variable `Business`:
+
+```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
+Business = firmdata$Business
+```
+
+Because of the program idiosyncratic data input requirements, which need to be compatible with both the *CreditRisk+* and *CreditMetrics* methods, it is necessary to specify at least two business sectors, even if the second sector is not used at all (keep in mind, however, that in a multifactor model, we will map each business line to a sector):
+
+```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
+business.lines = c("A","B")  # create second business sector, B, even if not used.
+```
+
+We do not use the `Country` field at all. But again, we need to specify it to be consistent with the data input requirements of the program:
+
+```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
+Country = firmdata$Country
+```
+
+As indicated earlier, the value of the firms, or strictly speaking, their asset value, depends on the value of the common factor. This dependence is captured by the weight matrix, `W`. We specify that the weight corresponding to the factor is `0.3`, where the factor corresponds to the business line `A`. We were forced to include a second business line to comply with the standard data input requirement but since this factor is unnecessary we specify a weight of  `0`: 
+
+```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
+
+# Assign weights of 0 to both factors, and name thee columns A and B
+W=matrix(0,nrow = n.firms,ncol = length(business.lines),
+dimnames = list(1:n.firms,business.lines))
+
+# Assign a weight = 0.3 to the first factor
+for(i in 1:n.firms){W[i,Business[i]]=0.3}
+
+```
+
+The calculation of the loss distribution relies on simulations. In each simulation, we specify a realization value to the common factor and stored it in the `random.numbers` matrix. The dimensions of this matrix are `N` rows, one for each number of simulations, and the number of columns is equal to the number of business lines that proxy for the factors. Again, realizations of the second factor do not matter at all but we need to fill in non-zero values:
+
+```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
+
+set.seed(17)    # set the random number generator seed to replicate simulations
+N = 1e6         # Number of simulations
+
+# Generate random realizations of the common factor
+# We assume that they come from a N(0,1) distribution
+# Other distributions can be used
+  
+random.numbers = matrix(0,ncol=length(business.lines), nrow=N, dimnames=list(1:N,business.lines))
+for(i in 1:N){
+  random.numbers[i,1]= rnorm(1,0,1)
+  random.numbers[i,2]= rnorm(1,0,1)
+}
+```
+
+All the elements are already in place to set up the credit portfolio. This requires creating a data frame, `portfolio`, according to the data input instructions of the package `GCPM`:
+
+```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
+
+Name= firmdata$firm                   # Name of the firms
+Default = rep("Bernoulli", n.firms)   # the type of default, Bernoulli for CreditMetrics option
+  
+portfolio = data.frame(Number=1:n.firms, Name = Name, Business = Business,
+                       Country = Country, EAD = EAD, LGD = LGD,
+                       PD = PD, Default=Default, W)  
+```
+
+Once the credit portfolio is in place, we have to tell `GCPM` what model we want to use via the `init` function:
+
+```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
+
+portfolio.model = init(model.type="simulative", link.function="CM", N=N, 
+                       loss.unit=1, LHR=rep(1,N), loss.thr=100, 
+                       random.numbers=random.numbers, max.entries=1e6)
+```
+
+The function `analyze` calculates the loss distribution once we indicate the model we use and the portfolio it applies to. We save the results in the object `portfolio.loss`. Most machines have multicore processors so we also take advantage of them by loading the package `parallel`:
+
+```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
+library(parallel)
+Ncores = detectCores() -1
+portfolio.loss = analyze(portfolio.model, portfolio, Ncores=Ncores)
+```
+
+# Calculating the systemic risk contributions
+
+## The distress insurance premium (DIP)
+
+The distress insurance premium is calculated as the contribution of each firm to the tail risk of the portfolio. The calculation of the risk contribution assumes that the loss of an individual firm increases marginally, which is equivalent to assume that its PD increases by a $\delta$ amount. 
+
+The `GCPM` package uses the command `ES.con()` to obtain the risk contribution to the expected shortfall of the portfolio via numerical methods. We specify first the confidence levels for the expected shortfall calculations with values ranging from 0.90 to 0.999 and collect them in the array `alpha`, run the risk contribution command specifying the portfolio loss object, and then store results in a data frame, `DIP.df`:
+
+```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
+
+alpha  = c(0.9, 0.95, 0.99, 0.999)
+DIP    = ES.cont(portfolio.loss, alpha)
+DIP.df = data.frame(Name, DIP)
+colnames(DIP.df) = c("firm","ES90","ES95","ES99","ES999")
+
+```
+
+The data frame `DIP.df` now stores the DIP contributions of each firm. We can rank the firms in terms of systemic importance using the `rank()` command:
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success', include=TRUE, eval=TRUE}
+rank90  = n.firms+1-rank(DIP.df$ES90)
+rank95  = n.firms+1-rank(DIP.df$ES95)
+rank99  = n.firms+1-rank(DIP.df$ES99)
+rank999 = n.firms+1-rank(DIP.df$ES999)
+
+DIP.rankings = data.frame(DIP.df$firm, rank90, rank95, rank99, rank999)
+colnames(DIP.rankings)[1] = "firm"
+
+```
+
+![DIP Ranking](figDIPRankings.png)
+
+## The marginal contribution to systemic risk (MCSR)
+
+Calculating the MCSR of a firm requires the calculation of the tail risk measure for two portfolios. The first portfolio does not include the firm so it contains only`n.firms -1` firms.  The second portfolio contains all the firms in the system. 
+
+We start with the portfolio that includes all the firms. To calculate its expected shortfall, for different confidence levels, we use the function `ES()`:
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success', eval=TRUE}
+ES.portfolio = ES(portfolio.loss,alpha)
+```
+
+Now, let's calculate the expected shortfall for Bank of America. This firm is the third one in the list (check the `Name` array in the Environment window). We need to remove it from the list of firms and construct the new portfolio, which we name `this.portfolio`:
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success', eval=TRUE}
+index.firm = 3
+
+this.Business = Business[-index.firm]
+this.Default  = Default[-index.firm]
+this.W = W[-index.firm,]
+this.Country = Country[-index.firm]
+this.EAD=EAD[-index.firm]
+this.LGD=LGD[-index.firm]
+this.Name=Name[-index.firm]
+this.PD = PD[-index.firm]
+
+this.portfolio = data.frame(Number=1:(n.firms-1), Name=this.Name, Business = this.Business,
+                     Country = this.Country, EAD=this.EAD, LGD = this.LGD,
+                     PD= this.PD, Default=this.Default,this.W)
+
+```
+
+We proceed to calculate the loss distribution using `analyze()` and save the results in the object `this.portfolio`. To find the MSCR of Bank of America, we calculate the expected shortfall of the new portfolio with the function `ES()`, and subtract it from the expected shortfall of the portfolio including all firms:
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success', eval=TRUE}
+
+this.portfolio = analyze(portfolio.model, this.portfolio, Ncores=Ncores)
+
+MCSR.BofA = ES.portfolio - ES(this.portfolio, alpha)
+```
+
+Repeating the process for each of the firms, we can obtain the risk ranking of the firms:
+
+![MCSR Ranking](figMCSRRankings.png)
+
+```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success', include=FALSE, eval=TRUE}
+
+MCSR.firm = matrix(NA, nrow=n.firms, ncol=length(alpha))
+
+for(i in 1:n.firms){
+  
+  # Remove one firm from the portfolio
+  
+  this.Business = Business[-i]
+  this.Default  = Default[-i]
+  this.W = W[-i,]
+  this.Country = Country[-i]
+  this.EAD=EAD[-i]
+  this.LGD=LGD[-i]
+  this.Name=Name[-i]
+  this.PD = PD[-i]
+  
+  this.portfolio = data.frame(Number=1:(n.firms-1), Name=this.Name, Business = this.Business,
+                       Country = this.Country, EAD=this.EAD, LGD = this.LGD,
+                       PD= this.PD, Default=this.Default,this.W)
+  
+  this.model = analyze(portfolio.model, this.portfolio, Ncores=Ncores)
+  MCSR.firm[i,] = ES.portfolio - ES(this.model, alpha)
+}
+
+MCSR.df = data.frame(Name, MCSR.firm)
+colnames(MCSR.df) = c("firm", "ES90", "ES95", "ES99", "ES999")
+rank90  = n.firms+1-rank(MCSR.df$ES90)
+rank95  = n.firms+1-rank(MCSR.df$ES95)
+rank99  = n.firms+1-rank(MCSR.df$ES99)
+rank999 = n.firms+1-rank(MCSR.df$ES999)
+MCSR.rankings = data.frame(MCSR.df$firm, rank90, rank95, rank99, rank999)
+colnames(MCSR.rankings)[1]="firm"
+```
+
+## The incremental contribution to systemic risk (ICSR)
+
+The ICSR of a firm requires contrasting the ex-ante loss distribution when the firm is not distressed; with the ex-post loss distribution, when the firm is distressed and there are potential negative spillovers to other firms. We will calculate this for Bank of America under two assumptions:
+
+* Distress implies that the PD of the firm doubles
+* The distress of the firm causes the PD of other firms to go up by 30 percent
+
+Note that the code lines are very similar to those in the previous examples:
+
+```{r, eval=TRUE, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
+
+this.PD[index.firm] =  2*PD[index.firm]      # Bank of America PD doubles
+this.PD = 1.3*PD                             # All other PDs increase by 30 percent
+
+this.portfolio = data.frame(Number=1:(n.firms), Name=Name, Business=Business,
+                     Country = Country, EAD=EAD, LGD = LGD,
+                     PD= this.PD, Default=Default, W)
+
+this.model = analyze(portfolio.model, this.portfolio, Ncores=Ncores)
+
+ICSR.BofA  = ES(this.model, alpha) - ES.portfolio
+
+```
+
+```{r, eval=TRUE, message=FALSE, warning=FALSE, include=FALSE, echo=FALSE}
+# Incremental contribution to systemic risk
+
+ICSR.firm = matrix(NA, nrow=n.firms, ncol=length(alpha))
+
+for(i in 1:n.firms){
+  this.PD = 1.3* PD
+  this.PD[i] = 2*PD[i]
+  
+  this.portfolio = data.frame(Number=1:(n.firms), Name=Name, Business =Business,
+                       Country = Country, EAD=EAD, LGD = LGD,
+                       PD= this.PD*3, Default=Default, W)
+  
+  this.model = analyze(portfolio.model, this.portfolio, Ncores=Ncores)
+  ICSR.firm[i,] = ES(this.model, alpha) - ES.portfolio
+}
+
+ICSR.df = data.frame(Name, ICSR.firm)
+colnames(ICSR.df) = c("firm", "ES90", "ES95", "ES99", "ES999")
+rank90 = n.firms+1-rank(ICSR.df$ES90)
+rank95 = n.firms+1-rank(ICSR.df$ES95)
+rank99 = n.firms+1-rank(ICSR.df$ES99)
+rank999 = n.firms+1-rank(ICSR.df$ES999)
+ICSR.rankings = data.frame(ICSR.df$firm, rank90, rank95, rank99, rank999)
+colnames(ICSR.rankings)[1]="firm"
+
+```
+The corresponding rankings are:
+
+![ICSR Ranking](figICSRRankings.png)
+
+### References
+
+- Chan-Lau, J.A. 2013. [*Systemic Risk Assessment and Oversight*](https://www.amazon.com/Systemic-Assessment-Oversight-Jorge-Chan-Lau/dp/1782720146) Risk Books. London.
+- Chan-Lau, J.A. 2010. [Regulatory capital charges for too-connected-to-fail institutions: a practical proposal](http://onlinelibrary.wiley.com/doi/10.1111/j.1468-0416.2010.00161.x/abstract). *Financial Markets, Institutions, and Instruments* 19. Lead article.
+- Huang, X., Zhou, H., Zhu, H. 2011. [Systemic risk contributions.](https://www.federalreserve.gov/pubs/feds/2011/201108/201108pap.pdf) FEDS Discussion Paper Series 2011-08.
+- Jakov, K. 2016. [Package 'GCPM'](https://cran.r-project.org/web/packages/GCPM/GCPM.pdf). CRAN repository.
+- Jakov, K., Fischer, M., 2016. [GCPM: a flexible package to explore credit portfolio risk.](http://www.ajs.or.at/index.php/ajs/article/viewFile/vol45-1-2/267) *Austrian Journal of Statistics* 45.
+- Tarashev, N., Borio, C., Tsatsaronis, C., 2010. [Attributing systemic risk to individual institutions.](http://www.bis.org/publ/work308.pdf) BIS WPs No. 308.
+- Zhu, H. 2010. [Comments on Chan-Lau, 2010](http://www.bis.org/repofficepubl/hkimr201007.07.pdf)
+
