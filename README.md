@@ -1,2 +1,2 @@
-# Systemic-Risk
-Lectures and Program Tutorials
+# Systemic Risk
+Lectures and computer tutorials
