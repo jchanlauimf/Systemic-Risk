@@ -14,7 +14,7 @@ subtitle: Jorge A. Chan-Lau
 
 # Objective
 
-This tutorial illustrates how to calculate systemic risk charges using the portfolio approach. The examples illustrate the principles underlying three different methodologies:
+This tutorial illustrates how to calculate systemic risk charges using the portfolio approach. The examples illustrate three different methodologies:
 
 1. The distress insurance premium (Huang, Zhou, and Zhu, 2011).
 2. The marginal contribution to systemic risk (Tarashev, Borio, and Tsatsaronis, 2010).
@@ -77,7 +77,7 @@ if(!require(ggplot2)){install.packages("ggplot2")}
 if(!require(lubridate)){install.packages("lubridate")}
 ```
 
-The current `R` session needs to call the packages. The `library()` command achieves this:
+The current `R` session needs to call the packages using the `library()` :
 
 ```{r, message=FALSE, warning=FALSE, class.source='bg-success', class.output='bg-danger'}
 library(GCPM)
@@ -98,6 +98,11 @@ rm(list=ls())
 filename = "firmdata.csv"
 firmdata = read.csv(filename, sep=",")
 rm(filename)
+```
+
+Check the `firmdata` data frame. There are data for 28 G-SIB banks. The exposure at default, `EAD`, has been set equal to total assets for each firm, and we have set the same value for the loss given default `LGD` parameters. The 5-year probability of default `PD` was downloaded from the *Credit Research Initiative* web site on October 20, 2017, and corresponds to the values reported on March 31, 2017. We assign these values to equally named variables:
+
+```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
 
 n.firms = dim(firmdata)[1]
 
@@ -106,15 +111,17 @@ EAD = firmdata$EAD
 LGD = firmdata$LGD
 ```
 
-The package `GCPM` requires assigning business lines and countries to each firm. This information is useful when using the *CreditRisk+* option as the loss distribution model. In this tutorial, we use the one-factor model which is an extension of Merton capital structure model of the firm  (Merton, 1974), is the underlying model behind Basel II (Gordy, 2003), and serves as the main model behind the *CreditMetrics* methodology. You may wonder why we do not use *CreditRisk+*. The reason is simple: it is not very precise when PDs are high. What are high PDs? Above 1 percent on annual basis for a *AAA* firm is considered high !
+In `firmdata` you will see that we have assigned a business line and a country to each firm. For all firms, the business line and country are the same. I explain why this step is needed.
 
-In the one factor model, a single common factor drives the value of the firm and affects its probability of default. The business sector `A` represents this factor, and we assign this to the variable `Business`:
+The package `GCPM` requires assigning business lines and countries to each firm. This information is useful when using the *CreditRisk+* option as the loss distribution model. While appealing, we will not use this option since it is recognized that the method may run into problems if the PDs are high. What is a high PD?  Above 1 percent on an annual basis is already considered high !
+
+Instead, we will use the `CreditMetrics` option within the context of a one factor model. In this model, a single common factor drives the value of the firm and affects its probability of default. The business sector `A` represents this factor, and we assign this to the variable `Business`:
 
 ```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
 Business = firmdata$Business
 ```
 
-Because of the program idiosyncratic data input requirements, which need to be compatible with both the *CreditRisk+* and *CreditMetrics* methods, it is necessary to specify at least two business sectors, even if the second sector is not used at all (keep in mind, however, that in a multifactor model, we will map each business line to a sector):
+Because of the program idiosyncratic data input requirements, which need to be compatible with both the *CreditRisk+* and *CreditMetrics* methods, it is necessary to specify at least two business sectors, even if the second sector is not used at all:
 
 ```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
 business.lines = c("A","B")  # create second business sector, B, even if not used.
@@ -126,7 +133,7 @@ We do not use the `Country` field at all. But again, we need to specify it to be
 Country = firmdata$Country
 ```
 
-As indicated earlier, the value of the firms, or strictly speaking, their asset value, depends on the value of the common factor. This dependence is captured by the weight matrix, `W`. We specify that the weight corresponding to the factor is `0.3`, where the factor corresponds to the business line `A`. We were forced to include a second business line to comply with the standard data input requirement but since this factor is unnecessary we specify a weight of  `0`: 
+As indicated earlier, the value of the firms, or strictly speaking, their asset value, depends on the value of the common factor. This dependence is captured by the weight matrix, `W`. We specify that the weight corresponding to the factor is `0.3`, where the factor corresponds to the business line `A`. We were forced to include a second business line to comply with the standard data input requirement. Since the second factor is unnecessary we specify a weight of  `0`: 
 
 ```{r, message=FALSE, warning=FALSE, class.output='bg-danger', class.source='bg-success'}
 
